@@ -3,6 +3,9 @@ api-salesforce
 
 Sample code for integrating Work Market with Salesforce.  Work Market API documentation can be found [here](https://www.workmarket.com/apidocs).
 
+This sample demonstrates creating an assignment in Work Market from a corresponding object in Salesforce, including pricing, location, scheduling, and custom field information.
+
+
 ##Setup
 
 Setting this demo up in your salesforce environment requires a few customizations in the following areas:
