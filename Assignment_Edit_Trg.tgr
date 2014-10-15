@@ -1,0 +1,83 @@
+trigger Assignment_Edit_Trg on Assignment__c (after update) {
+  /* Create map to old and new assignments */
+  Map<Id, Assignment__c> newAssignments = new Map<Id, Assignment__c>();
+  Map<Id, Assignment__c> oldAssignments = new Map<Id, Assignment__c>();
+
+  /* Store new assignments */
+  for (Assignment__c assignment : Trigger.new) {
+    newAssignments.put(assignment.Id, assignment);
+  }
+
+  /* Store old assignments */
+  for (Assignment__c assignment : Trigger.old) {
+    oldAssignments.put(assignment.Id, assignment);
+  }
+
+  /* Get details we'll need later in single query reduce quota usage */
+  Map<Id, Assignment__c> assignmentDetails = new Map<Id, Assignment__c> ([
+    SELECT Name, Assignment_ID__c, Description__c, Assigned_Resource__c, Group__c, Pricing_Type__c, Rate__c, Resource__c,
+    Secondary_Rate__c, Start_Time_Site_Local__c, End_Time_Site_Local__c, Status__c, Template__c, Title__c, Owner.Email,
+    Max_Hours_Units__c, Max_Hours_Secondary_Rate__c
+    FROM Assignment__c WHERE Id IN :newAssignments.keySet()
+    ]);
+
+  for (Assignment__c assignment: Trigger.new) {
+
+    Map<String, String> params = new Map <String, String>();
+    Assignment__c oldAssignment = oldAssignments.get(assignment.Id);
+
+    params.put('title', assignment.Title__c);
+    params.put('description', assignment.Description__c);
+
+    // For demo purposes, we pre-select Technology industry (ID: 1000)
+    params.put('industry_id', '1000');
+
+    /* Pricing */
+    params = WM_Helpers.addPricingParams(assignment, params);
+
+    /* Schedule */
+    params.put('scheduled_start_date', WM_Helpers.getFormattedStartTime(assignment));
+    if (String.isNotEmpty(WM_Helpers.getFormattedEndTime(assignment))) {
+      params.put('scheduled_end_date', WM_Helpers.getFormattedEndTime(assignment));
+    }
+
+    /* Example sending the assignment to a group */
+    // if (assignment.Group__c == 'Group 1') {
+    //   params.put('send_to_groups[0]', '1234');
+    // }
+
+    /* Example setting the WM assignment template */
+    // if (assignment.Template__c == 'Template A') {
+    //   params.put('template_id', '12345678');
+    // }
+
+    /* Location */
+    params = WM_Helpers.addLocationParams(assignment, params);
+
+    /* Custom Fields */
+    WM_Custom_Field_Set customFields = new WM_Custom_Field_Set(Integer.valueOf(Label.WM_CF_Default_Grp_ID), 0);
+    customFields.addField(Integer.valueOf(Label.WM_CF_Object_SF_ID), assignment.Id);
+    params = customFields.addToParamsList(params);
+
+    String oldStatus = oldAssignment.Status__c;
+    String newStatus = assignment.Status__c;
+
+    Boolean statusChanged = !(newStatus.equals(oldStatus));
+
+    /* Watch the status field, if it's gone from "Draft" to "Published to WorK Market", that's the signal to fire the createAssignment call */
+    if (String.isEmpty(assignment.Assignment_ID__c) && oldStatus.equals('Draft') && newStatus.equals('Published to Work Market')) {
+      /* Do Create */
+      System.debug('ACTION: create assignment');
+      WM_API_Client.createAssignment(params, assignment.Name);
+
+      try {
+        update assignmentDetails.get(assignment.Id);
+      } catch (DmlException e) {
+        for (Integer i = 0; i < e.getNumDml(); i++) {
+          // Process exception here
+          System.debug(e.getDmlMessage(i));
+        }
+      }
+    }
+  }
+}
